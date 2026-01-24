@@ -2,4 +2,7 @@ venv/
 __pycache__/
 *.pyc
 *.pkl
-.env
+
+# raw datasets / docs
+data/statlog+german+credit+data/
+data/german_credit_raw.data
