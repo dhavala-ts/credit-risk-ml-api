@@ -10,59 +10,44 @@ class CreditRiskExplainer:
     def __init__(self, pipeline):
         self.preprocessor = pipeline.named_steps["preprocess"]
         self.model = pipeline.named_steps["model"]
-
-        # TreeExplainer works for RandomForest / XGBoost / ExtraTrees
         self.explainer = shap.TreeExplainer(self.model)
 
         self.output_dir = "outputs/shap"
         os.makedirs(self.output_dir, exist_ok=True)
 
     def explain(self, data: dict, top_k: int = 5, save_plot: bool = True):
-        # ---- INPUT ----
         df = pd.DataFrame([data])
 
-        # ---- TRANSFORM ----
         X = self.preprocessor.transform(df)
         feature_names = self.preprocessor.get_feature_names_out()
 
-        # ---- SHAP VALUES ----
         shap_values = self.explainer.shap_values(X)
 
-        # Binary classifier safe handling
+        # ---- SAFE SHAP HANDLING (binary classifier) ----
         if isinstance(shap_values, list):
-            shap_array = shap_values[1]   # positive class
+            shap_array = shap_values[1][0]
         else:
-            shap_array = shap_values
+            shap_array = shap_values[0]
 
-        shap_array = np.asarray(shap_array)
-        shap_array = np.squeeze(shap_array)
+        shap_array = np.asarray(shap_array).flatten()
 
-        # Ensure shape = (n_features,)
-        if shap_array.ndim > 1:
-            shap_array = shap_array.reshape(-1)
-
-        # ---- AGGREGATE ONE-HOT FEATURES (ROBUST) ----
+        # ---- AGGREGATE ONE-HOT FEATURES ----
         grouped = {}
-
         for name, value in zip(feature_names, shap_array):
             base_feature = name.split("__")[-1].split("_")[0]
-
-            # CRITICAL FIX: always collapse to scalar
-            scalar_value = float(np.sum(value))
-
             grouped.setdefault(base_feature, 0.0)
-            grouped[base_feature] += scalar_value
+            grouped[base_feature] += float(value)
 
         # ---- TOP-K FEATURES ----
         top_features = dict(
             sorted(grouped.items(), key=lambda x: abs(x[1]), reverse=True)[:top_k]
         )
 
-        image_path = None
+        image_name = None
         if save_plot:
-            image_path = self._save_bar_plot(top_features)
+            image_name = self._save_bar_plot(top_features)
 
-        return top_features, image_path
+        return top_features, image_name
 
     def _save_bar_plot(self, top_features: dict) -> str:
         features = list(top_features.keys())
@@ -77,14 +62,16 @@ class CreditRiskExplainer:
         plt.title("Top Drivers of Credit Risk Prediction")
         plt.tight_layout()
 
-        filename = f"{self.output_dir}/shap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        plt.savefig(filename, dpi=150)
+        filename = f"shap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        filepath = os.path.join(self.output_dir, filename)
+
+        plt.savefig(filepath, dpi=150)
         plt.close()
 
         return filename
 
 
-# ---- SINGLETON EXPLAINER (IMPORTANT FOR API PERFORMANCE) ----
+# ---- SINGLETON WRAPPER ----
 _explainer_instance = None
 
 
