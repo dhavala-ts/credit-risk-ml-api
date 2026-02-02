@@ -1,24 +1,45 @@
-import joblib
 import pandas as pd
 from fastapi import APIRouter, HTTPException
-from app.schemas.schema import CreditRequest, CreditResponse
+
+from app.schemas.schema import (
+    CreditRequest,
+    CreditResponse,
+    ExplainResponse
+)
+from app.core.model import predict_credit
+from app.core.explain import explain_prediction
 
 router = APIRouter()
 
-try:
-    model = joblib.load("app/model.pkl")
-except Exception as e:
-    raise RuntimeError(f"Failed to load model: {e}")
 
 @router.post("/predict", response_model=CreditResponse)
 def predict_credit_risk(request: CreditRequest):
     try:
         df = pd.DataFrame([request.data])
-        probability = model.predict_proba(df)[0][1]
-        prediction = 1 if probability >= 0.5 else 0
+        probability, prediction = predict_credit(df)
+
         return CreditResponse(
             prediction=prediction,
             probability=probability
         )
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/explain", response_model=ExplainResponse)
+def explain_credit_risk(request: CreditRequest):
+    try:
+        df = pd.DataFrame([request.data])
+
+        probability, prediction = predict_credit(df)
+        top_features = explain_prediction(df)
+
+        return ExplainResponse(
+            prediction=prediction,
+            probability=probability,
+            top_features=top_features
+        )
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
