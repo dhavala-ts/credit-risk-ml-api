@@ -6,7 +6,7 @@ from app.schemas.schema import (
     CreditResponse,
     ExplainResponse
 )
-from app.core.model import predict_credit
+from app.core.model import predict_credit, pipeline
 from app.core.explain import explain_prediction
 
 router = APIRouter()
@@ -33,12 +33,17 @@ def explain_credit_risk(request: CreditRequest):
         df = pd.DataFrame([request.data])
 
         probability, prediction = predict_credit(df)
-        top_features = explain_prediction(df)
+
+        top_features, image_path = explain_prediction(
+            pipeline=pipeline,
+            data=request.data
+        )
 
         return ExplainResponse(
             prediction=prediction,
             probability=probability,
-            top_features=top_features
+            top_features=top_features,
+            image_path=image_path
         )
 
     except Exception as e:

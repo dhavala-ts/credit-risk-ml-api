@@ -1,55 +1,97 @@
 import shap
+import pandas as pd
 import numpy as np
-
-from app.core.model import model, preprocessor
-
-
-# Lazy-loaded explainer
-_explainer = None
+import matplotlib.pyplot as plt
+import os
+from datetime import datetime
 
 
-def get_explainer():
-    global _explainer
-    if _explainer is None:
-        rf_model = model.named_steps["model"]
-        _explainer = shap.TreeExplainer(rf_model)
-    return _explainer
+class CreditRiskExplainer:
+    def __init__(self, pipeline):
+        self.preprocessor = pipeline.named_steps["preprocess"]
+        self.model = pipeline.named_steps["model"]
+
+        # TreeExplainer works for RandomForest / XGBoost / ExtraTrees
+        self.explainer = shap.TreeExplainer(self.model)
+
+        self.output_dir = "outputs/shap"
+        os.makedirs(self.output_dir, exist_ok=True)
+
+    def explain(self, data: dict, top_k: int = 5, save_plot: bool = True):
+        # ---- INPUT ----
+        df = pd.DataFrame([data])
+
+        # ---- TRANSFORM ----
+        X = self.preprocessor.transform(df)
+        feature_names = self.preprocessor.get_feature_names_out()
+
+        # ---- SHAP VALUES ----
+        shap_values = self.explainer.shap_values(X)
+
+        # Binary classifier safe handling
+        if isinstance(shap_values, list):
+            shap_array = shap_values[1]   # positive class
+        else:
+            shap_array = shap_values
+
+        shap_array = np.asarray(shap_array)
+        shap_array = np.squeeze(shap_array)
+
+        # Ensure shape = (n_features,)
+        if shap_array.ndim > 1:
+            shap_array = shap_array.reshape(-1)
+
+        # ---- AGGREGATE ONE-HOT FEATURES (ROBUST) ----
+        grouped = {}
+
+        for name, value in zip(feature_names, shap_array):
+            base_feature = name.split("__")[-1].split("_")[0]
+
+            # CRITICAL FIX: always collapse to scalar
+            scalar_value = float(np.sum(value))
+
+            grouped.setdefault(base_feature, 0.0)
+            grouped[base_feature] += scalar_value
+
+        # ---- TOP-K FEATURES ----
+        top_features = dict(
+            sorted(grouped.items(), key=lambda x: abs(x[1]), reverse=True)[:top_k]
+        )
+
+        image_path = None
+        if save_plot:
+            image_path = self._save_bar_plot(top_features)
+
+        return top_features, image_path
+
+    def _save_bar_plot(self, top_features: dict) -> str:
+        features = list(top_features.keys())
+        values = list(top_features.values())
+
+        plt.figure(figsize=(8, 4))
+        colors = ["red" if v > 0 else "green" for v in values]
+
+        plt.barh(features, values, color=colors)
+        plt.axvline(0, color="black", linewidth=0.8)
+        plt.xlabel("SHAP Contribution (→ higher risk | ← lower risk)")
+        plt.title("Top Drivers of Credit Risk Prediction")
+        plt.tight_layout()
+
+        filename = f"{self.output_dir}/shap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        plt.savefig(filename, dpi=150)
+        plt.close()
+
+        return filename
 
 
-def explain_prediction(df):
-    explainer = get_explainer()
+# ---- SINGLETON EXPLAINER (IMPORTANT FOR API PERFORMANCE) ----
+_explainer_instance = None
 
-    X_transformed = preprocessor.transform(df)
-    shap_values = explainer.shap_values(X_transformed)
 
-    feature_names = preprocessor.get_feature_names_out()
+def explain_prediction(pipeline, data: dict, top_k: int = 5):
+    global _explainer_instance
 
-    # Handle all SHAP output formats safely
-    if isinstance(shap_values, list):
-        shap_array = shap_values[1]
-    else:
-        shap_array = shap_values
+    if _explainer_instance is None:
+        _explainer_instance = CreditRiskExplainer(pipeline)
 
-    shap_array = np.array(shap_array)[0]
-
-    if shap_array.ndim == 2:
-        shap_array = shap_array.flatten()
-
-    # Aggregate one-hot encoded features
-    grouped = {}
-
-    for name, value in zip(feature_names, shap_array):
-        original_feature = name.split("__")[-1].split("_")[0]
-        grouped.setdefault(original_feature, 0.0)
-        grouped[original_feature] += float(value)
-
-    # Top 5 most impactful features
-    top_features = dict(
-        sorted(
-            grouped.items(),
-            key=lambda x: abs(x[1]),
-            reverse=True
-        )[:5]
-    )
-
-    return top_features
+    return _explainer_instance.explain(data, top_k=top_k)

@@ -1,9 +1,9 @@
+from typing import Dict, Optional
 from pydantic import BaseModel
-from typing import Dict, Any
 
 
 class CreditRequest(BaseModel):
-    data: Dict[str, Any]
+    data: dict
 
 
 class CreditResponse(BaseModel):
@@ -15,3 +15,4 @@ class ExplainResponse(BaseModel):
     prediction: int
     probability: float
     top_features: Dict[str, float]
+    image_path: Optional[str]
