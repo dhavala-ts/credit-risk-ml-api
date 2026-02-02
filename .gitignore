@@ -6,3 +6,18 @@ __pycache__/
 # raw datasets / docs
 data/statlog+german+credit+data/
 data/german_credit_raw.data
+# virtual environments
+venv/
+myenv/
+.env/
+
+# python cache
+__pycache__/
+*.pyc
+
+# model artifacts
+*.pkl
+
+# OS junk
+.DS_Store
+
